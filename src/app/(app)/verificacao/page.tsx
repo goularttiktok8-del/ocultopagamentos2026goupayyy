@@ -1,0 +1,5 @@
+const stages = [['01', 'Dados pessoais', 'Informe seus dados de cadastro.', 'current'], ['02', 'Identidade', 'Faça a verificação de identidade.', 'waiting'], ['03', 'Conta para saque', 'Cadastre a chave Pix de destino.', 'waiting']];
+
+export default function VerificationPage() {
+  return <div className="page-wrap narrow-page"><header className="page-header"><div><p className="eyebrow">VERIFICAÇÃO</p><h1>Confirme sua identidade.</h1><p className="page-subtitle">Isso mantém sua conta e todos os recebimentos protegidos.</p></div></header><section className="verification-card"><div className="progress-line"><span /></div>{stages.map(([number, title, description, state]) => <div className={`verify-stage ${state}`} key={number}><span>{number}</span><div><strong>{title}</strong><p>{description}</p></div>{state === 'current' ? <button className="button button-dark">Começar →</button> : <i>◌</i>}</div>)}</section><p className="legal-copy">A Oculto Pagamentos conhece e valida seus dados. A proposta é reduzir a exposição desnecessária deles a terceiros — não oferecer anonimato.</p></div>;
+}
