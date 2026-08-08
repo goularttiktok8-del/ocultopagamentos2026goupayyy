@@ -21,6 +21,7 @@ button { cursor:pointer; }
 .verification-link.active { border-color:#bdbdb9; color:#202020; }
 .status-dot { width:7px; height:7px; border-radius:50%; background:#d09b2a; box-shadow:0 0 0 3px #fff4d9; }
 .profile-mini { width:100%; text-align:left; display:flex; align-items:center; gap:10px; padding:12px; border:0; border-top:1px solid var(--line); background:transparent; }
+.profile-form { margin:0; }
 .profile-mini>span:first-child { width:30px; height:30px; border-radius:50%; display:grid; place-items:center; background:#e8e8e5; color:#333; font-family:'DM Mono'; font-size:10px; }
 .profile-mini-copy { display:grid; gap:1px; font-size:11px; }.profile-mini-copy strong { font-size:12px; }.profile-mini-copy small { color:var(--muted); }
 .main-content { min-width:0; background:#fff; }

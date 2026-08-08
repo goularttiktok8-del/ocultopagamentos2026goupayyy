@@ -19,7 +19,7 @@ export function AuthCard({ mode }: { mode: 'login' | 'signup' }) {
       const password = String(form.get('password') || '');
       if (signup) {
         const displayName = String(form.get('display_name') || '').trim();
-        const { error } = await supabase.auth.signUp({ email, password, options: { data: { display_name: displayName }, emailRedirectTo: `${window.location.origin}/dashboard` } });
+        const { error } = await supabase.auth.signUp({ email, password, options: { data: { display_name: displayName }, emailRedirectTo: `${window.location.origin}/auth/confirm?next=/dashboard` } });
         if (error) throw error;
         setMessage('Enviamos um link de confirmação para o seu e-mail.');
       } else {

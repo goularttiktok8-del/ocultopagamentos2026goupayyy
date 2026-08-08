@@ -30,9 +30,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Link href="/verificacao" className={`verification-link ${pathname === '/verificacao' ? 'active' : ''}`}>
             <span className="status-dot" /> Verificação
           </Link>
-          <button className="profile-mini" type="button">
+          <form action="/api/auth/signout" method="post" className="profile-form">
+          <button className="profile-mini" type="submit" title="Sair da conta">
             <span>OP</span><span className="profile-mini-copy"><strong>Minha conta</strong><small>Conta pessoal</small></span>
           </button>
+          </form>
         </div>
       </aside>
       <main className="main-content">{children}</main>
