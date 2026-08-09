@@ -5,15 +5,16 @@ import { createSupabaseAdminClient } from '@/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 
-type RecipientEvent = {
-  id?: unknown;
-  type?: unknown;
-  data?: {
-    id?: unknown;
-    status?: unknown;
-    kyc_details?: { status?: unknown; status_reason?: unknown };
-  };
-};
+type ProviderEvent = { id?: unknown; type?: unknown; data?: unknown; created_at?: unknown };
+type ObjectMap = Record<string, unknown>;
+
+function asObject(value: unknown): ObjectMap {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as ObjectMap : {};
+}
+
+function asText(value: unknown, max = 300) {
+  return typeof value === 'string' ? value.slice(0, max) : '';
+}
 
 function safeEqual(left: string, right: string) {
   const leftBuffer = Buffer.from(left, 'hex');
@@ -23,11 +24,10 @@ function safeEqual(left: string, right: string) {
 
 function isValidSignature(rawBody: string, provided: string, secret: string) {
   const normalized = provided.includes('=') ? provided.split('=').slice(1).join('=').trim() : provided.trim();
-  const signatures = [
+  return [
     createHmac('sha1', secret).update(rawBody).digest('hex'),
     createHmac('sha256', secret).update(rawBody).digest('hex'),
-  ];
-  return signatures.some((signature) => safeEqual(signature, normalized));
+  ].some((signature) => safeEqual(signature, normalized));
 }
 
 function validBasicAuth(request: NextRequest, user: string, password: string) {
@@ -47,6 +47,126 @@ function recipientState(status: string, kycStatus: string) {
   return { accountStatus: 'pending_kyc', kyc: 'pending' } as const;
 }
 
+function providerEventId(type: string, event: ProviderEvent, rawBody: string) {
+  const id = asText(event.id, 160);
+  return id ? `${type}:${id}` : `${type}:${sha256(rawBody)}`;
+}
+
+function providerDate(value: unknown) {
+  if (typeof value !== 'string') return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+async function handleRecipientUpdated(data: ObjectMap, eventId: string) {
+  const recipientId = asText(data.id, 190);
+  const providerStatus = asText(data.status, 80);
+  const kyc = asObject(data.kyc_details);
+  const providerKycStatus = asText(kyc.status, 80);
+  if (!recipientId || !providerStatus) throw new ApiError('Payload inválido.', 400);
+
+  const admin = createSupabaseAdminClient();
+  const { data: account, error: accountError } = await admin.from('accounts')
+    .select('id').eq('pagarme_recipient_id', recipientId).maybeSingle();
+  // Do not disclose whether an unrelated Pagar.me recipient belongs to this application.
+  if (accountError || !account) return;
+
+  const mapped = recipientState(providerStatus, providerKycStatus);
+  const reason = asText(kyc.status_reason, 300) || null;
+  const { error: updateError } = await admin.from('accounts').update({
+    status: mapped.accountStatus,
+    kyc_status: mapped.kyc,
+    kyc_status_reason: reason,
+    updated_at: new Date().toISOString(),
+  }).eq('id', account.id);
+  if (updateError) throw new ApiError('Não foi possível processar o evento.', 500);
+
+  const { error: eventError } = await admin.from('kyc_events').insert({
+    account_id: account.id,
+    status: mapped.kyc,
+    provider_event_id: eventId,
+    reason,
+  });
+  if (eventError && eventError.code !== '23505') throw new ApiError('Não foi possível registrar o evento.', 500);
+}
+
+async function handlePaymentPaid(type: string, data: ObjectMap, eventId: string, createdAt: string | null) {
+  const charges = Array.isArray(data.charges) ? data.charges : [];
+  const firstCharge = asObject(charges[0]);
+  const nestedCharge = asObject(data.charge);
+  const orderId = type.startsWith('order.') ? asText(data.id, 190) : asText(data.order_id, 190);
+  const chargeId = asText(firstCharge.id || nestedCharge.id || data.id, 190);
+  if (!orderId && !chargeId) throw new ApiError('Payload inválido.', 400);
+
+  const admin = createSupabaseAdminClient();
+  let query = admin.from('payments').select('id, amount_cents');
+  query = orderId ? query.eq('pagarme_order_id', orderId) : query.eq('pagarme_charge_id', chargeId);
+  const { data: payment, error } = await query.maybeSingle();
+  if (error || !payment) return;
+  const amount = typeof data.amount === 'number' ? data.amount : typeof data.paid_amount === 'number' ? data.paid_amount : null;
+  if (amount !== null && Number(payment.amount_cents) !== amount) throw new ApiError('Valor do evento não confere.', 422);
+
+  const paidAt = providerDate(firstCharge.paid_at) || providerDate(data.paid_at) || createdAt;
+  const { error: settleError } = await admin.rpc('settle_pagarme_payment', {
+    p_order_id: orderId || null,
+    p_charge_id: chargeId || null,
+    p_provider_event_id: eventId,
+    p_paid_at: paidAt,
+  });
+  if (settleError) throw new ApiError('Não foi possível registrar o pagamento.', 500);
+}
+
+async function handlePaymentFailed(type: string, data: ObjectMap) {
+  const charges = Array.isArray(data.charges) ? data.charges : [];
+  const firstCharge = asObject(charges[0]);
+  const orderId = type.startsWith('order.') ? asText(data.id, 190) : asText(data.order_id, 190);
+  const chargeId = asText(firstCharge.id || data.id, 190);
+  if (!orderId && !chargeId) throw new ApiError('Payload inválido.', 400);
+
+  const { error } = await createSupabaseAdminClient().rpc('fail_pagarme_payment', {
+    p_order_id: orderId || null,
+    p_charge_id: chargeId || null,
+    p_reason: type,
+  });
+  if (error) throw new ApiError('Não foi possível registrar a falha.', 500);
+}
+
+async function handlePaymentRefunded(data: ObjectMap, eventId: string) {
+  const chargeId = asText(data.id, 190);
+  if (!chargeId) throw new ApiError('Payload inválido.', 400);
+  const { error } = await createSupabaseAdminClient().rpc('refund_pagarme_payment', {
+    p_charge_id: chargeId,
+    p_provider_event_id: eventId,
+    p_reason: 'Pagamento estornado pelo provedor.',
+  });
+  if (error) throw new ApiError('Não foi possível registrar o estorno.', 500);
+}
+
+async function handleTransferEvent(type: string, data: ObjectMap, eventId: string) {
+  const transferId = asText(data.id, 190);
+  const providerStatus = asText(data.status, 80).toLowerCase();
+  if (!transferId) throw new ApiError('Payload inválido.', 400);
+
+  const admin = createSupabaseAdminClient();
+  const { data: withdrawal, error } = await admin.from('withdrawals')
+    .select('id').eq('pagarme_transfer_id', transferId).maybeSingle();
+  if (error || !withdrawal) return;
+
+  if (['transferred', 'paid', 'completed'].includes(providerStatus) || type.endsWith('.transferred')) {
+    const { error: completeError } = await admin.rpc('complete_pagarme_withdrawal', {
+      p_withdrawal_id: withdrawal.id, p_transfer_id: transferId,
+    });
+    if (completeError) throw new ApiError('Não foi possível concluir o saque.', 500);
+  } else if (['failed', 'canceled', 'cancelled', 'refused'].includes(providerStatus) || type.endsWith('.failed') || type.endsWith('.canceled')) {
+    const { error: failError } = await admin.rpc('fail_pagarme_withdrawal', {
+      p_withdrawal_id: withdrawal.id,
+      p_provider_event_id: eventId,
+      p_reason: 'Transferência não concluída pelo provedor.',
+    });
+    if (failError) throw new ApiError('Não foi possível reverter o saque.', 500);
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     limitRequest(request, 'pagarme-webhook', 120);
@@ -62,54 +182,21 @@ export async function POST(request: NextRequest) {
     const authenticatedByBasic = Boolean(basicUser && basicPass && validBasicAuth(request, basicUser, basicPass));
     if (!authenticatedBySignature && !authenticatedByBasic) throw new ApiError('Não autorizado.', 401);
 
-    let event: RecipientEvent;
-    try { event = JSON.parse(rawBody) as RecipientEvent; }
+    let event: ProviderEvent;
+    try { event = JSON.parse(rawBody) as ProviderEvent; }
     catch { throw new ApiError('Payload inválido.', 400); }
-    if (event.type !== 'recipient.updated') return noStoreJson({ received: true });
+    const type = asText(event.type, 80);
+    if (!type) throw new ApiError('Payload inválido.', 400);
+    const data = asObject(event.data);
+    const eventId = providerEventId(type, event, rawBody);
+    const createdAt = providerDate(event.created_at);
 
-    const recipientId = typeof event.data?.id === 'string' ? event.data.id : '';
-    const providerStatus = typeof event.data?.status === 'string' ? event.data.status : '';
-    const providerKycStatus = typeof event.data?.kyc_details?.status === 'string' ? event.data.kyc_details.status : '';
-    if (!recipientId || !providerStatus) throw new ApiError('Payload inválido.', 400);
+    if (type === 'recipient.updated') await handleRecipientUpdated(data, eventId);
+    else if (type === 'order.paid' || type === 'charge.paid') await handlePaymentPaid(type, data, eventId, createdAt);
+    else if (type === 'order.payment_failed' || type === 'order.canceled' || type === 'charge.payment_failed') await handlePaymentFailed(type, data);
+    else if (type === 'charge.refunded') await handlePaymentRefunded(data, eventId);
+    else if (type.startsWith('transfer.')) await handleTransferEvent(type, data, eventId);
 
-    const mapped = recipientState(providerStatus, providerKycStatus);
-    const eventId = typeof event.id === 'string' && event.id.length <= 190
-      ? `recipient.updated:${event.id}`
-      : `recipient.updated:${sha256(rawBody)}`;
-    const reason = typeof event.data?.kyc_details?.status_reason === 'string'
-      ? event.data.kyc_details.status_reason.slice(0, 300)
-      : null;
-
-    const admin = createSupabaseAdminClient();
-    const { data: account, error: accountError } = await admin.from('accounts')
-      .select('id')
-      .eq('pagarme_recipient_id', recipientId)
-      .maybeSingle();
-    // A valid event for a recipient belonging to another application must not leak information.
-    if (accountError || !account) return noStoreJson({ received: true });
-
-    const { error: updateError } = await admin.from('accounts').update({
-      status: mapped.accountStatus,
-      kyc_status: mapped.kyc,
-      kyc_status_reason: reason,
-      updated_at: new Date().toISOString(),
-    }).eq('id', account.id);
-    if (updateError) throw new ApiError('Não foi possível processar o evento.', 500);
-
-    const { error: eventError } = await admin.from('kyc_events').insert({
-      account_id: account.id,
-      status: mapped.kyc,
-      provider_event_id: eventId,
-      reason,
-    });
-    if (eventError && eventError.code !== '23505') throw new ApiError('Não foi possível registrar o evento.', 500);
-
-    await admin.from('audit_events').insert({
-      account_id: account.id,
-      event_type: 'kyc.provider_status_updated',
-      entity_type: 'account',
-      entity_id: account.id,
-    });
     return noStoreJson({ received: true });
   } catch (error) {
     return apiError(error);

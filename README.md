@@ -17,7 +17,8 @@ Aplicação independente para cadastro/KYC, recebimentos, saldo e saques. Ela po
 - `SUPABASE_SECRET_KEY` (ou, temporariamente, `SUPABASE_SERVICE_ROLE_KEY`) nunca vai para o navegador ou Git.
 - Configure o webhook Pagar.me em `https://www.ocultopagamentos.com.br/api/webhooks/pagarme` com assinatura HMAC ou Basic Auth. Sem uma dessas proteções, o endpoint rejeita o evento.
 - O fluxo de KYC cria o recebedor Pagar.me no servidor, sem persistir CPF, endereço ou dados bancários brutos na base do app.
-- Saques são reservados em uma transação atômica e entram em `pending_review`; o envio bancário só deve ser ativado depois de definir a operação administrativa e a regra de tarifas.
-- `PAYMENT_COLLECTIONS_ENABLED` começa como `false`. Não habilite recebimentos reais até definir o split/quem arca com a tarifa do Pix e concluir o endpoint de checkout e seus webhooks.
+- Cada saque reserva o saldo em uma transação atômica antes de criar uma transferência idempotente para a conta bancária validada pelo KYC. Erros definitivos do provedor devolvem o saldo; falhas de rede ficam em processamento para impedir uma transferência duplicada.
+- `PLATFORM_PIX_FEE_CENTS` é obrigatória para criar Pix e deve conter a taxa fixa, em centavos (por exemplo, `200` para R$ 2,00). O split credita ao usuário o valor líquido informado pela plataforma, enquanto a conta da plataforma arca com a tarifa de processamento da Pagar.me.
+- No webhook Pagar.me, marque `recipient.updated`, `order.paid`, `order.payment_failed`, `order.canceled`, `charge.paid`, `charge.payment_failed`, `charge.refunded` e os eventos de transferência disponibilizados pela sua conta. O endpoint ignora eventos que não usa.
 
 Nunca envie chaves privadas pelo chat nem as versione no Git.

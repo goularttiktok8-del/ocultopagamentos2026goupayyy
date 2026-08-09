@@ -20,9 +20,6 @@ export async function POST(request: NextRequest) {
     requireSameOrigin(request);
     assertSmallJsonRequest(request);
     limitRequest(request, 'payment-request', 12);
-    if (process.env.PAYMENT_COLLECTIONS_ENABLED !== 'true') {
-      throw new ApiError('Os recebimentos ainda não foram ativados para esta aplicação.', 503);
-    }
     const user = await requireAuthenticatedUser();
     const body = await request.json() as { label?: unknown; amount?: unknown; singleUse?: unknown };
 
@@ -46,9 +43,9 @@ export async function POST(request: NextRequest) {
       public_token_hash: sha256(token),
       label,
       amount_cents: amountCents,
-      // A cobrança de uso único é finalizada pelo webhook do pagamento.
+      single_use: body.singleUse !== false,
       status: 'active',
-    }).select('id, label, amount_cents, status, created_at').single();
+    }).select('id, label, amount_cents, single_use, status, created_at').single();
     if (insertError || !paymentRequest) throw new ApiError('Não foi possível criar o recebimento.', 500);
 
     await admin.from('audit_events').insert({

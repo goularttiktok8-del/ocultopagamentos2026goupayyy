@@ -1,6 +1,22 @@
 type PagarmeRecipient = { id: string; status?: string; kyc_details?: { status?: string; status_reason?: string } };
 type PagarmeKycLink = { url: string; expiration_date?: string };
 
+export type PagarmePixOrder = {
+  id: string;
+  status?: string;
+  charges?: Array<{
+    id?: string;
+    status?: string;
+    last_transaction?: {
+      qr_code?: string;
+      qr_code_url?: string;
+      expires_at?: string;
+    };
+  }>;
+};
+
+export type PagarmeTransfer = { id: string; status?: string };
+
 export type PagarmeIndividualRecipientInput = {
   code: string;
   name: string;
@@ -49,6 +65,7 @@ async function pagarmeRequest<T>(path: string, init: RequestInit = {}): Promise<
     headers: {
       Accept: 'application/json',
       Authorization: `Basic ${credentials}`,
+      'User-Agent': 'OcultoPagamentos/1.0',
       ...(init.body ? { 'Content-Type': 'application/json' } : {}),
       ...init.headers,
     },
@@ -60,6 +77,90 @@ async function pagarmeRequest<T>(path: string, init: RequestInit = {}): Promise<
     throw new PagarmeError('O provedor não aceitou esta solicitação.', response.status);
   }
   return response.json() as Promise<T>;
+}
+
+export async function createPixOrder(input: {
+  code: string;
+  amountCents: number;
+  label: string;
+  payer: { name: string; email: string; document: string; phone: { ddd: string; number: string } };
+  recipientId: string;
+  platformRecipientId: string;
+  platformFeeCents: number;
+  idempotencyKey: string;
+  paymentId: string;
+  paymentRequestId: string;
+}) {
+  if (input.platformFeeCents < 0 || input.platformFeeCents >= input.amountCents) {
+    throw new PagarmeError('A taxa configurada para o recebimento é inválida.');
+  }
+  if (!input.recipientId || !input.platformRecipientId || input.recipientId === input.platformRecipientId) {
+    throw new PagarmeError('A configuração de recebimento da plataforma está incompleta.');
+  }
+
+  const recipientAmount = input.amountCents - input.platformFeeCents;
+  return pagarmeRequest<PagarmePixOrder>('/orders', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': input.idempotencyKey },
+    body: JSON.stringify({
+      code: input.code,
+      items: [{ amount: input.amountCents, description: input.label.slice(0, 256), quantity: 1, code: input.code }],
+      customer: {
+        name: input.payer.name,
+        email: input.payer.email,
+        document: input.payer.document,
+        type: 'individual',
+        phones: {
+          mobile_phone: {
+            country_code: '55',
+            area_code: input.payer.phone.ddd,
+            number: input.payer.phone.number,
+          },
+        },
+      },
+      payments: [{
+        payment_method: 'pix',
+        pix: { expires_in: 86_400 },
+        split: [
+          {
+            amount: recipientAmount,
+            recipient_id: input.recipientId,
+            type: 'flat',
+            options: { charge_processing_fee: false, liable: false, charge_remainder_fee: false },
+          },
+          {
+            amount: input.platformFeeCents,
+            recipient_id: input.platformRecipientId,
+            type: 'flat',
+            // The platform bears processor fees so the ledger can credit the recipient's stated net amount.
+            options: { charge_processing_fee: true, liable: true, charge_remainder_fee: true },
+          },
+        ],
+      }],
+      metadata: {
+        application: 'oculto_pagamentos',
+        payment_id: input.paymentId,
+        payment_request_id: input.paymentRequestId,
+      },
+    }),
+  });
+}
+
+export async function createTransfer(input: {
+  amountCents: number;
+  recipientId: string;
+  withdrawalId: string;
+  idempotencyKey: string;
+}) {
+  return pagarmeRequest<PagarmeTransfer>('/transfers', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': input.idempotencyKey },
+    body: JSON.stringify({
+      amount: input.amountCents,
+      recipient_id: input.recipientId,
+      metadata: { application: 'oculto_pagamentos', withdrawal_id: input.withdrawalId },
+    }),
+  });
 }
 
 export async function createIndividualRecipient(input: PagarmeIndividualRecipientInput) {
