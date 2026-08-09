@@ -86,6 +86,7 @@ export async function POST(request: NextRequest) {
         streetNumber: text(body.streetNumber, 'o número do endereço', 1, 20),
         neighborhood: text(body.neighborhood, 'o bairro', 2, 80),
         city: text(body.city, 'a cidade', 2, 80),
+        referencePoint: text(body.referencePoint, 'um ponto de referência', 2, 100),
         state,
         zipCode: digits(body.zipCode, 'o CEP', 8, 8),
       },

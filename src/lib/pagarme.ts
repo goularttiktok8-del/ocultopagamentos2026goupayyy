@@ -32,6 +32,7 @@ export type PagarmeIndividualRecipientInput = {
     streetNumber: string;
     neighborhood: string;
     city: string;
+    referencePoint: string;
     state: string;
     zipCode: string;
   };
@@ -208,6 +209,7 @@ export async function createIndividualRecipient(input: PagarmeIndividualRecipien
           street_number: input.address.streetNumber,
           neighborhood: input.address.neighborhood,
           city: input.address.city,
+          reference_point: input.address.referencePoint,
           state: input.address.state,
           zip_code: input.address.zipCode,
         },
