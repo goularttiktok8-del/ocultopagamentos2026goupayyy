@@ -39,7 +39,7 @@ export type PagarmeIndividualRecipientInput = {
   bankAccount: {
     bank: string;
     branchNumber: string;
-    branchCheckDigit: string;
+    branchCheckDigit?: string;
     accountNumber: string;
     accountCheckDigit: string;
     type: 'checking' | 'savings';
@@ -195,7 +195,7 @@ export async function createIndividualRecipient(input: PagarmeIndividualRecipien
         holder_document: input.document,
         bank: input.bankAccount.bank,
         branch_number: input.bankAccount.branchNumber,
-        branch_check_digit: input.bankAccount.branchCheckDigit,
+        ...(input.bankAccount.branchCheckDigit ? { branch_check_digit: input.bankAccount.branchCheckDigit } : {}),
         account_number: input.bankAccount.accountNumber,
         account_check_digit: input.bankAccount.accountCheckDigit,
         type: input.bankAccount.type,

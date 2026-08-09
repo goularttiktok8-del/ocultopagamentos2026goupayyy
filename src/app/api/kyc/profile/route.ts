@@ -30,6 +30,13 @@ function digits(value: unknown, label: string, min: number, max: number) {
   return normalized;
 }
 
+function optionalDigits(value: unknown, label: string, max: number) {
+  const normalized = typeof value === 'string' ? value.replace(/\D/g, '') : '';
+  if (!normalized) return undefined;
+  if (normalized.length > max) throw new ApiError(`Informe ${label}.`, 400);
+  return normalized;
+}
+
 function isValidCpf(cpf: string) {
   if (cpf.length !== 11 || /^(\d)\1+$/.test(cpf)) return false;
   const checkDigit = (length: number) => {
@@ -89,7 +96,7 @@ export async function POST(request: NextRequest) {
       bankAccount: {
         bank: digits(body.bankCode, 'o código do banco', 3, 3),
         branchNumber: digits(body.branchNumber, 'a agência', 1, 6),
-        branchCheckDigit: digits(body.branchCheckDigit, 'o dígito da agência', 1, 1),
+        branchCheckDigit: optionalDigits(body.branchCheckDigit, 'o dígito da agência', 1),
         accountNumber: digits(body.accountNumber, 'a conta', 1, 13),
         accountCheckDigit: digits(body.accountCheckDigit, 'o dígito da conta', 1, 1),
         type: body.accountType === 'savings' ? 'savings' as const : 'checking' as const,
