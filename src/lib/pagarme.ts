@@ -59,13 +59,26 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function safeProviderMessage(value: unknown) {
+  if (typeof value !== 'string') return undefined;
+  return value
+    .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '[redacted-email]')
+    .replace(/\b(?:sk|pk)_[a-z0-9_-]+\b/gi, '[redacted-key]')
+    .replace(/(?:\d[ .-]?){8,}\d/g, '[redacted-number]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300) || undefined;
+}
+
 function providerErrorSummary(value: unknown) {
   const body = asRecord(value);
   const errors = asRecord(body?.errors);
+  const message = body?.message ?? body?.error ?? body?.error_message ?? value;
 
   return {
     provider_code: typeof body?.code === 'string' ? body.code : undefined,
     provider_type: typeof body?.type === 'string' ? body.type : undefined,
+    provider_message: safeProviderMessage(message),
     // Field names help identify an invalid payload without storing personal or bank data in logs.
     error_fields: errors ? Object.keys(errors).slice(0, 20) : [],
   };
@@ -93,10 +106,17 @@ async function pagarmeRequest<T>(path: string, init: RequestInit = {}): Promise<
   });
 
   if (!response.ok) {
-    const providerBody: unknown = await response.json().catch(() => null);
+    const rawProviderBody = await response.text();
+    let providerBody: unknown = rawProviderBody;
+    try {
+      providerBody = JSON.parse(rawProviderBody) as unknown;
+    } catch {
+      // Some provider errors use plain text rather than JSON.
+    }
     console.error('[pagarme] request rejected', {
       endpoint: path.startsWith('/recipients/') ? '/recipients/:id/kyc_link' : path,
       status: response.status,
+      content_type: response.headers.get('content-type')?.split(';')[0],
       ...providerErrorSummary(providerBody),
     });
     throw new PagarmeError('O provedor não aceitou esta solicitação.', response.status);
