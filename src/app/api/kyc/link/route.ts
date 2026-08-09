@@ -9,8 +9,9 @@ export async function POST(request: NextRequest) {
   try {
     requireSameOrigin(request);
     assertSmallJsonRequest(request, 1_000);
-    limitRequest(request, 'kyc-link', 5);
     const user = await requireAuthenticatedUser();
+    await limitRequest(request, 'kyc-link-ip', 20, { windowSeconds: 3600 });
+    await limitRequest(request, 'kyc-link-user', 5, { windowSeconds: 3600, subject: user.id });
     const admin = createSupabaseAdminClient();
     const { data: account, error } = await admin.from('accounts')
       .select('id, pagarme_recipient_id, status, kyc_status')

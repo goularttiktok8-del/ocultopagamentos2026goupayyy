@@ -18,8 +18,9 @@ export async function POST(request: NextRequest) {
   try {
     requireSameOrigin(request);
     assertSmallJsonRequest(request);
-    limitRequest(request, 'withdrawal', 5);
     const user = await requireAuthenticatedUser();
+    await limitRequest(request, 'withdrawal-ip', 20, { windowSeconds: 600 });
+    await limitRequest(request, 'withdrawal-user', 3, { windowSeconds: 600, subject: user.id });
     const body = await request.json() as { amount?: unknown };
     const amountCents = parseAmountToCents(typeof body.amount === 'string' ? body.amount : '');
     if (amountCents === null) throw new ApiError('Informe um valor válido.', 400);

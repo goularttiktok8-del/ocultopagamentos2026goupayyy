@@ -11,7 +11,7 @@ function validToken(token: string) {
 
 export async function GET(request: NextRequest, context: { params: Promise<{ token: string }> }) {
   try {
-    limitRequest(request, 'public-payment-view', 60);
+    await limitRequest(request, 'public-payment-view', 60);
     const { token } = await context.params;
     if (!validToken(token)) throw new ApiError('Cobrança não encontrada.', 404);
 

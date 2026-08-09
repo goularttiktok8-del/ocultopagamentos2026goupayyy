@@ -53,7 +53,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
   try {
     requireSameOrigin(request);
     assertSmallJsonRequest(request);
-    limitRequest(request, 'public-payment-pix', 10);
+    await limitRequest(request, 'public-payment-pix', 5, { windowSeconds: 600 });
     const { token } = await context.params;
     if (!validToken(token)) throw new ApiError('Cobrança não encontrada.', 404);
     const body = await request.json() as PixBody;
@@ -93,11 +93,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
     const platformRecipientId = process.env.PLATFORM_RECIPIENT_ID?.trim();
     if (!platformRecipientId) throw new ApiError('O recebimento da plataforma ainda não foi configurado.', 503);
 
-    let { data: payment, error: paymentError } = await admin.from('payments')
+    const { data: existingPayment, error: paymentError } = await admin.from('payments')
       .select('id, status, amount_cents, fee_cents, net_amount_cents, provider_idempotency_key, pagarme_order_id, pix_qr_code, pix_expires_at')
       .eq('payment_request_id', paymentRequest.id)
       .eq('status', 'pending')
       .maybeSingle();
+    let payment = existingPayment;
     if (paymentError) throw new ApiError('Não foi possível preparar o pagamento.', 500);
 
     if (!payment) {

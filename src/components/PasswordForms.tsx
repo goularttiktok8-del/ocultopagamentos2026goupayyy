@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { FormEvent, useState } from 'react';
+import { passwordPolicyError } from '@/lib/password-policy';
 import { createSupabaseBrowserClient } from '@/lib/supabase';
 
 export function PasswordRecoveryForm() {
@@ -33,6 +34,8 @@ export function PasswordUpdateForm() {
       const form = new FormData(event.currentTarget);
       const password = String(form.get('password') || '');
       const confirm = String(form.get('confirm') || '');
+      const passwordError = passwordPolicyError(password);
+      if (passwordError) throw new Error(passwordError);
       if (password !== confirm) throw new Error('As senhas não coincidem.');
       const supabase = createSupabaseBrowserClient();
       const { error } = await supabase.auth.updateUser({ password });

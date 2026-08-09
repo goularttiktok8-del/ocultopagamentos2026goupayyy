@@ -19,8 +19,9 @@ export async function POST(request: NextRequest) {
   try {
     requireSameOrigin(request);
     assertSmallJsonRequest(request);
-    limitRequest(request, 'payment-request', 12);
     const user = await requireAuthenticatedUser();
+    await limitRequest(request, 'payment-request-ip', 60, { windowSeconds: 3600 });
+    await limitRequest(request, 'payment-request-user', 30, { windowSeconds: 3600, subject: user.id });
     const body = await request.json() as { label?: unknown; amount?: unknown; singleUse?: unknown };
 
     const label = typeof body.label === 'string' ? body.label.trim().replace(/\s+/g, ' ') : '';

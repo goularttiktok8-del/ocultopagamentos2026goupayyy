@@ -169,7 +169,7 @@ async function handleTransferEvent(type: string, data: ObjectMap, eventId: strin
 
 export async function POST(request: NextRequest) {
   try {
-    limitRequest(request, 'pagarme-webhook', 120);
+    await limitRequest(request, 'pagarme-webhook', 300);
     const contentLength = Number(request.headers.get('content-length') || 0);
     if (!Number.isFinite(contentLength) || contentLength > 1_000_000) throw new ApiError('Payload inválido.', 413);
     const rawBody = await request.text();

@@ -61,7 +61,10 @@ export function useAccountSnapshot() {
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void refresh(); }, 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [refresh]);
   return { data, error, loading, refresh };
 }
 

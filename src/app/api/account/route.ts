@@ -1,12 +1,15 @@
-import { noStoreJson } from '@/lib/api-security';
+import { NextRequest } from 'next/server';
+import { apiError, limitRequest, noStoreJson } from '@/lib/api-security';
 import { createSupabaseServerClient } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  try {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return noStoreJson({ error: 'Não autorizado.' }, { status: 401 });
+  await limitRequest(request, 'account-read', 120, { subject: user.id });
 
   const { data: account, error } = await supabase.from('accounts')
     .select('id, display_name, status, kyc_status, payout_key_last4, created_at')
@@ -61,4 +64,7 @@ export async function GET() {
     withdrawals: withdrawalsResult.data || [],
     payment_requests: requestsResult.data || [],
   });
+  } catch (error) {
+    return apiError(error);
+  }
 }

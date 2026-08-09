@@ -1,6 +1,7 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -40,7 +41,10 @@ export default function PublicPaymentPage() {
     }
   }, [token]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [load]);
   useEffect(() => {
     if (data?.payment?.status !== 'pending') return;
     const interval = window.setInterval(() => { void load(); }, 10_000);
@@ -51,9 +55,10 @@ export default function PublicPaymentPage() {
   const displayedAmount = data?.payment?.amount_cents ?? data?.payment_request.amount_cents ?? null;
   const hasPix = Boolean(data?.payment?.pix_qr_code && !paymentIsPaid);
   const fixedAmount = data?.payment_request.amount_cents !== null;
-  const expiresLabel = useMemo(() => data?.payment?.pix_expires_at
-    ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(data.payment.pix_expires_at))
-    : '', [data?.payment?.pix_expires_at]);
+  const expiresAt = data?.payment?.pix_expires_at;
+  const expiresLabel = expiresAt
+    ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(expiresAt))
+    : '';
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -83,7 +88,7 @@ export default function PublicPaymentPage() {
   }
 
   return <main className="public-payment-page"><section className="public-payment-card">
-    <a className="public-wordmark" href="/">oculto<span>.</span></a>
+    <Link className="public-wordmark" href="/">oculto<span>.</span></Link>
     {loading && <p className="public-muted">Carregando cobrança…</p>}
     {!loading && message && !data && <p className="public-error">{message}</p>}
     {data && <>

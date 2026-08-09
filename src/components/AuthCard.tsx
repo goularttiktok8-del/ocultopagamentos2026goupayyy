@@ -1,10 +1,13 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { FormEvent, useState } from 'react';
+import { passwordPolicyError } from '@/lib/password-policy';
 import { createSupabaseBrowserClient } from '@/lib/supabase';
 
 export function AuthCard({ mode }: { mode: 'login' | 'signup' }) {
+  const router = useRouter();
   const signup = mode === 'signup';
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,6 +21,8 @@ export function AuthCard({ mode }: { mode: 'login' | 'signup' }) {
       const email = String(form.get('email') || '').trim();
       const password = String(form.get('password') || '');
       if (signup) {
+        const passwordError = passwordPolicyError(password);
+        if (passwordError) throw new Error(passwordError);
         const displayName = String(form.get('display_name') || '').trim();
         const { error } = await supabase.auth.signUp({ email, password, options: { data: { display_name: displayName }, emailRedirectTo: `${window.location.origin}/auth/confirm?next=/dashboard` } });
         if (error) throw error;
@@ -25,7 +30,7 @@ export function AuthCard({ mode }: { mode: 'login' | 'signup' }) {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        window.location.assign('/dashboard');
+        router.push('/dashboard');
       }
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível continuar.'); }
     finally { setLoading(false); }

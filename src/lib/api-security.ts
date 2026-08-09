@@ -1,23 +1,27 @@
-import { createHash, randomBytes } from 'crypto';
+import { createHash, createHmac, randomBytes } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
+import { createSupabaseAdminClient } from '@/lib/supabase-admin';
 import { createSupabaseServerClient } from '@/lib/supabase-server';
 
-const WINDOW_MS = 60_000;
-const requests = new Map<string, { count: number; resetAt: number }>();
-
 export class ApiError extends Error {
-  constructor(message: string, public readonly status: number) {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly retryAfterSeconds?: number,
+  ) {
     super(message);
   }
 }
 
 export function apiError(error: unknown) {
   if (error instanceof ApiError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    const response = noStoreJson({ error: error.message }, { status: error.status });
+    if (error.retryAfterSeconds) response.headers.set('Retry-After', String(error.retryAfterSeconds));
+    return response;
   }
 
   // Do not pass provider, database, or validation implementation details to the browser.
-  return NextResponse.json({ error: 'Não foi possível concluir esta operação agora.' }, { status: 500 });
+  return noStoreJson({ error: 'Não foi possível concluir esta operação agora.' }, { status: 500 });
 }
 
 export async function requireAuthenticatedUser() {
@@ -43,21 +47,55 @@ export function requireSameOrigin(request: NextRequest) {
   }
 }
 
-export function limitRequest(request: NextRequest, bucket: string, limit: number) {
-  const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  const ip = forwardedFor || request.headers.get('x-real-ip') || 'unknown';
-  const key = `${bucket}:${ip}`;
-  const now = Date.now();
-  const entry = requests.get(key);
+type RateLimitOptions = {
+  windowSeconds?: number;
+  subject?: string;
+};
 
-  if (!entry || entry.resetAt <= now) {
-    requests.set(key, { count: 1, resetAt: now + WINDOW_MS });
-    return;
+function clientAddress(request: NextRequest) {
+  // Vercel provides this header from its edge. The fallbacks keep local development usable.
+  const vercelAddress = request.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim();
+  const forwardedFor = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+  return vercelAddress || forwardedFor || request.headers.get('x-real-ip') || 'unknown';
+}
+
+function protectedRateLimitKey(bucket: string, identity: string) {
+  const secret = process.env.RATE_LIMIT_SECRET || process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!secret) throw new ApiError('O serviço de segurança está indisponível.', 503);
+
+  return `v1:${createHmac('sha256', secret).update(`${bucket}:${identity}`).digest('base64url')}`;
+}
+
+/**
+ * A durable, atomic counter stored in Supabase. Unlike an in-memory Map, it is
+ * shared by all Vercel function instances and never stores the raw IP/user id.
+ */
+export async function limitRequest(
+  request: NextRequest,
+  bucket: string,
+  limit: number,
+  { windowSeconds = 60, subject }: RateLimitOptions = {},
+) {
+  if (!/^[a-z0-9-]{3,64}$/.test(bucket) || !Number.isInteger(limit) || limit < 1 || !Number.isInteger(windowSeconds) || windowSeconds < 1 || windowSeconds > 86_400) {
+    throw new ApiError('O serviço de segurança está indisponível.', 503);
   }
 
-  entry.count += 1;
-  if (entry.count > limit) {
-    throw new ApiError('Muitas tentativas. Aguarde um minuto e tente novamente.', 429);
+  const identity = subject ? `user:${subject}` : `ip:${clientAddress(request)}`;
+  const { data, error } = await createSupabaseAdminClient().rpc('check_api_rate_limit', {
+    p_rate_key: protectedRateLimitKey(bucket, identity),
+    p_limit: limit,
+    p_window_seconds: windowSeconds,
+  });
+  const result = Array.isArray(data) ? data[0] : null;
+  if (error || !result || typeof result.allowed !== 'boolean') {
+    // Fail closed: sensitive endpoints must not become unprotected when the limiter fails.
+    throw new ApiError('O serviço de segurança está indisponível. Tente novamente em instantes.', 503);
+  }
+  if (!result.allowed) {
+    const retryAfter = typeof result.retry_after_seconds === 'number'
+      ? Math.max(1, Math.ceil(result.retry_after_seconds))
+      : windowSeconds;
+    throw new ApiError('Muitas tentativas. Aguarde antes de tentar novamente.', 429, retryAfter);
   }
 }
 

@@ -61,8 +61,9 @@ export async function POST(request: NextRequest) {
   try {
     requireSameOrigin(request);
     assertSmallJsonRequest(request, 16_000);
-    limitRequest(request, 'kyc-profile', 3);
     const user = await requireAuthenticatedUser();
+    await limitRequest(request, 'kyc-profile-ip', 10, { windowSeconds: 3600 });
+    await limitRequest(request, 'kyc-profile-user', 3, { windowSeconds: 3600, subject: user.id });
     if (!user.email || !user.email_confirmed_at) throw new ApiError('Confirme seu e-mail antes de iniciar a verificação.', 409);
     const body = await request.json() as Record<string, unknown>;
 
