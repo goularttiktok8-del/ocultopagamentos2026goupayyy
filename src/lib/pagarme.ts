@@ -52,6 +52,24 @@ export class PagarmeError extends Error {
   }
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function providerErrorSummary(value: unknown) {
+  const body = asRecord(value);
+  const errors = asRecord(body?.errors);
+
+  return {
+    provider_code: typeof body?.code === 'string' ? body.code : undefined,
+    provider_type: typeof body?.type === 'string' ? body.type : undefined,
+    // Field names help identify an invalid payload without storing personal or bank data in logs.
+    error_fields: errors ? Object.keys(errors).slice(0, 20) : [],
+  };
+}
+
 function apiKey() {
   const key = process.env.PAGARME_API_KEY?.trim();
   if (!key) throw new PagarmeError('O provedor de pagamentos ainda não foi configurado.');
@@ -74,6 +92,12 @@ async function pagarmeRequest<T>(path: string, init: RequestInit = {}): Promise<
   });
 
   if (!response.ok) {
+    const providerBody: unknown = await response.json().catch(() => null);
+    console.error('[pagarme] request rejected', {
+      endpoint: path.startsWith('/recipients/') ? '/recipients/:id/kyc_link' : path,
+      status: response.status,
+      ...providerErrorSummary(providerBody),
+    });
     throw new PagarmeError('O provedor não aceitou esta solicitação.', response.status);
   }
   return response.json() as Promise<T>;
