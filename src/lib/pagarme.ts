@@ -90,6 +90,11 @@ function apiKey() {
   return key;
 }
 
+function formatBirthdateForPagarme(value: string) {
+  const [year, month, day] = value.split('-');
+  return `${day}/${month}/${year}`;
+}
+
 async function pagarmeRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const credentials = Buffer.from(`${apiKey()}:`).toString('base64');
   const response = await fetch(`https://api.pagar.me/core/v5${path}`, {
@@ -220,7 +225,7 @@ export async function createIndividualRecipient(input: PagarmeIndividualRecipien
         type: 'individual',
         site_url: process.env.NEXT_PUBLIC_APP_URL || 'https://www.ocultopagamentos.com.br',
         mother_name: input.motherName,
-        birthdate: `${input.birthdate}T00:00:00`,
+        birthdate: formatBirthdateForPagarme(input.birthdate),
         monthly_income: input.monthlyIncome,
         professional_occupation: input.occupation,
         address: {
