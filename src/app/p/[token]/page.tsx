@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
+import { QRCodeSVG } from 'qrcode.react';
 
 type PaymentView = {
   payment_request: { label: string; amount_cents: number | null; expires_at: string | null };
@@ -91,6 +92,10 @@ export default function PublicPaymentPage() {
       {displayedAmount !== null && <strong className="public-amount">{money.format(displayedAmount / 100)}</strong>}
       {paymentIsPaid ? <p className="public-success">Seu pagamento foi confirmado. Você já pode fechar esta página.</p> : hasPix ? <div className="pix-panel">
         <p>Abra o app do seu banco, escolha Pix Copia e Cola e use o código abaixo.</p>
+        <div className="pix-qr" role="img" aria-label="QR Code Pix">
+          <QRCodeSVG value={data.payment?.pix_qr_code || ''} size={208} level="M" includeMargin />
+          <small>Escaneie com o aplicativo do seu banco.</small>
+        </div>
         <textarea readOnly aria-label="Código Pix" value={data.payment?.pix_qr_code || ''} />
         <button className="public-button" type="button" onClick={() => void copyPix()}>{copied ? 'Código copiado' : 'Copiar código Pix'}</button>
         {expiresLabel && <small>Este Pix expira em {expiresLabel}.</small>}
